@@ -1,0 +1,16 @@
+{
+  "name": "Daily Panel",
+  "short_name": "Daily Panel",
+  "description": "Training, food rules, measurements and bloodwork for the six-month liver plan.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f6f7",
+  "theme_color": "#00846d",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
