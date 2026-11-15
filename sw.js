@@ -1,6 +1,6 @@
 /* Daily Panel — offline service worker.
    Bump CACHE when index.html changes so phones pick the new version up. */
-const CACHE = "daily-panel-v1-2026-08-24";
+const CACHE = "daily-panel-v3-2026-11-15";
 const SHELL = [
   "./",
   "./index.html",

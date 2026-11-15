@@ -276,6 +276,25 @@ ol.steps li:last-child{margin-bottom:0}
           <div class="hint">Target −7 cm</div>
         </div>
       </div>
+      <div class="hr"></div>
+      <div class="mini" style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:9px">
+        <span>Composition &mdash; monthly</span><span data-dyn id="comp-due"></span>
+      </div>
+      <div class="fields" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="f">
+          <label for="w-bf">Body fat %</label>
+          <input id="w-bf" type="number" inputmode="decimal" min="3" max="60" step="0.1" placeholder="&mdash;">
+        </div>
+        <div class="f">
+          <label for="w-mm">Muscle %</label>
+          <input id="w-mm" type="number" inputmode="decimal" min="10" max="70" step="0.1" placeholder="&mdash;">
+        </div>
+        <div class="f">
+          <label for="w-vf">Visceral</label>
+          <input id="w-vf" type="number" inputmode="numeric" min="1" max="59" step="1" placeholder="&mdash;">
+        </div>
+      </div>
+      <div class="sub" style="margin-top:9px;font-size:12px;line-height:1.45" data-dyn id="comp-derived"></div>
       <div class="hint" style="margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--muted)" data-dyn id="week-of"></div>
     </div>
 
@@ -301,6 +320,21 @@ ol.steps li:last-child{margin-bottom:0}
         <div data-dyn id="chart-waist"></div>
         <figcaption data-dyn id="waist-caption"></figcaption>
       </figure>
+    </div>
+
+    <div class="card">
+      <h2>Composition <span class="r" data-dyn id="comp-count"></span></h2>
+      <div class="f" style="margin-bottom:12px">
+        <label for="comp-pick">Measure</label>
+        <select id="comp-pick" data-dyn></select>
+      </div>
+      <figure>
+        <div data-dyn id="chart-comp"></div>
+        <div class="legend"><span><i></i><span data-dyn id="comp-legend">Logged</span></span><span><i class="dash"></i>Target</span></div>
+        <figcaption data-dyn id="comp-caption"></figcaption>
+      </figure>
+      <div class="hr"></div>
+      <div data-dyn id="comp-table"></div>
     </div>
 
     <div class="card">
@@ -680,7 +714,7 @@ function day(d){
   if(!S.daily[d].r) S.daily[d].r=[0,0,0,0,0,0,0];
   return S.daily[d];
 }
-function week(d){ if(!S.weekly[d]) S.weekly[d]={w:null,waist:null,t:now()}; return S.weekly[d]; }
+function week(d){ if(!S.weekly[d]) S.weekly[d]={w:null,waist:null,bf:null,mm:null,vf:null,t:now()}; return S.weekly[d]; }
 function sess(d){
   if(!S.sess[d]) S.sess[d]={k:sessionKeyFor(d),ex:{},blocks:{},done:false,short:false,mins:null,t:now()};
   if(!S.sess[d].ex) S.sess[d].ex={};
@@ -798,6 +832,178 @@ function buildSteps(k,d){
     });
   }
   return steps;
+}
+
+function __startW(){ return startW(); }
+function __targetW(){ return targetW(); }
+
+/* ---------------- body composition ----------------
+   Logged on the Sunday weigh-in, monthly rather than weekly: fat and muscle
+   percentages move too little week to week to read as anything but noise.
+   Fat mass and lean mass are derived, because they are the pair that actually
+   answers the question — fat down while lean holds is the whole goal. */
+var COMP_DAYS = 28;
+var COMP = [
+  {k:"bf", n:"Body fat",    u:"%",  dp:1, dir:"down"},
+  {k:"fm", n:"Fat mass",    u:"kg", dp:1, dir:"down", derived:true},
+  {k:"lm", n:"Lean mass",   u:"kg", dp:1, dir:"hold", derived:true},
+  {k:"mm", n:"Muscle",      u:"%",  dp:1, dir:"up"},
+  {k:"vf", n:"Visceral fat",u:"",   dp:0, dir:"down"}
+];
+function compLabel(c){ return c.n + (c.u ? " ("+c.u+")" : ""); }
+
+function compEntries(){
+  return Object.keys(S.weekly).sort().map(function(d){
+    var r = S.weekly[d];
+    if(r.bf==null && r.mm==null && r.vf==null) return null;
+    var o = {d:d, w:r.w, bf:r.bf, mm:r.mm, vf:r.vf};
+    if(r.w!=null && r.bf!=null){
+      o.fm = Math.round(r.w*r.bf/100*10)/10;
+      o.lm = Math.round((r.w - r.w*r.bf/100)*10)/10;
+    }
+    return o;
+  }).filter(Boolean);
+}
+
+/* Targets are derived, never stored: hold the lean mass you have, take the
+   planned weight off the fat side, and see where each measure lands. */
+function compTarget(k){
+  if(k === "vf") return 10;
+  var list = compEntries();
+  if(!list.length) return null;
+  var f = list[0], w0 = __startW(), wt = __targetW();
+  if(w0==null || wt==null || f.w==null) return null;
+  var drop = w0 - wt;
+  if(k === "mm") return f.mm==null ? null : Math.round(f.w*f.mm/100/wt*1000)/10;
+  if(f.bf == null) return null;
+  var fm0 = f.w*f.bf/100;
+  if(k === "fm") return Math.round((fm0-drop)*10)/10;
+  if(k === "lm") return Math.round((f.w-fm0)*10)/10;
+  if(k === "bf") return Math.round((fm0-drop)/wt*1000)/10;
+  return null;
+}
+
+function compDueDays(){
+  var list = compEntries();
+  if(!list.length) return null;
+  return daysBetween(list[list.length-1].d, TODAY);
+}
+
+function renderCompEntry(){
+  var k = sundayOf(TODAY), rec = week(k);
+  var due = $("comp-due");
+  if(due){
+    due.innerHTML = "";
+    var n = compDueDays();
+    if(rec.bf!=null || rec.mm!=null || rec.vf!=null) due.appendChild(el("span","chip good","logged"));
+    else if(n==null) due.appendChild(el("span","chip warn","no reading yet"));
+    else if(n >= COMP_DAYS) due.appendChild(el("span","chip warn","due — "+n+" days"));
+    else due.appendChild(el("span","chip flat","next in "+(COMP_DAYS-n)+" days"));
+  }
+  var d = $("comp-derived");
+  if(!d) return;
+  d.textContent = "";
+  if(rec.w!=null && rec.bf!=null){
+    var fm = Math.round(rec.w*rec.bf/100*10)/10, lm = Math.round((rec.w-fm)*10)/10;
+    d.textContent = "That works out at " + fm + " kg of fat and " + lm + " kg of lean mass. "
+      + "Lean mass holding while fat falls is the outcome the plan is after.";
+  } else if(rec.bf != null){
+    d.textContent = "Add this week's weight above and the fat / lean mass split works itself out — body fat on its own can't tell you which side moved.";
+  } else {
+    d.textContent = "Same scale, same time of day, fasted, before you drink anything — otherwise these numbers are hydration, not progress.";
+  }
+}
+
+function renderComp(){
+  var list = compEntries(), pick = $("comp-pick");
+  if(!pick) return;
+  if(pick.options.length !== COMP.length){
+    pick.innerHTML = "";
+    COMP.forEach(function(c){ var o = el("option",null,compLabel(c)); o.value = c.k; pick.appendChild(o); });
+  }
+  var sel = COMP.filter(function(c){ return c.k === pick.value; })[0] || COMP[0];
+  pick.value = sel.k;
+
+  var cnt = $("comp-count"); cnt.innerHTML = "";
+  cnt.appendChild(el("span","chip "+(list.length?"flat":"warn"),
+    list.length ? (list.length + (list.length===1?" reading":" readings")) : "none yet"));
+
+  var pts = list.filter(function(e){ return e[sel.k]!=null; }).map(function(e){
+    return {x:daysBetween(START,e.d), y:e[sel.k],
+            label:fmt(e.d)+" — "+e[sel.k]+(sel.u?" "+sel.u:""), xLabel:fmt(e.d)};
+  });
+  var tgt = compTarget(sel.k);
+  $("comp-legend").textContent = sel.n;
+  lineChart($("chart-comp"), pts, {
+    target: tgt, xMax: daysBetween(START,END), dp: sel.dp,
+    alt: sel.n + " over time",
+    empty: "No composition reading yet. Step on the scale on a Sunday morning and this fills in."
+  });
+
+  var cap = $("comp-caption");
+  if(pts.length < 2){
+    cap.textContent = tgt==null
+      ? "One reading is a starting point, not a trend. The second one is where this becomes useful."
+      : "Target " + tgt + (sel.u?" "+sel.u:"") + ", derived from holding your lean mass while the planned weight comes off.";
+  } else {
+    var a = pts[0].y, b = pts[pts.length-1].y, delta = Math.round((b-a)*10)/10;
+    var moved = delta===0 ? "unchanged" : (delta>0?"up "+delta:"down "+Math.abs(delta)) + (sel.u?" "+sel.u:"");
+    var verdict;
+    if(sel.dir === "hold") verdict = Math.abs(delta) <= 0.8
+      ? "Holding, which is exactly right — lean mass is the thing you protect."
+      : (delta < 0 ? "Drifting down. If that continues, the deficit is too steep or protein is short." : "Up, which at your stage usually means hydration rather than new muscle.");
+    else if(sel.dir === "down") verdict = delta < 0 ? "Moving the right way." : "Not moving the right way yet — give it another month before reading much into it.";
+    else verdict = delta > 0 ? "Moving the right way." : "Flat or down. Percentage muscle rises mostly because fat falls, so read it alongside fat mass.";
+    cap.textContent = sel.n + " " + moved + " since the first reading. " + verdict;
+  }
+
+  var host = $("comp-table"); host.innerHTML = "";
+  if(!list.length){
+    host.appendChild(el("div","empty","Body fat, muscle and visceral fat land here once you log a reading."));
+    return;
+  }
+  var t = el("table");
+  t.innerHTML = "<thead><tr><th>Measure</th><th class='num'>First</th><th class='num'>Now</th><th class='num'>Target</th></tr></thead>";
+  var tb = el("tbody");
+  COMP.forEach(function(c){
+    var vals = list.filter(function(e){ return e[c.k]!=null; });
+    if(!vals.length) return;
+    var first = vals[0][c.k], last = vals[vals.length-1][c.k], tg = compTarget(c.k);
+    var tr = el("tr");
+    var nc = el("td");
+    nc.appendChild(document.createTextNode(c.n));
+    if(c.derived){
+      var dv = el("div",null,"derived");
+      dv.style.fontSize="10px"; dv.style.color="var(--muted)"; dv.style.fontFamily="var(--mono)";
+      nc.appendChild(dv);
+    }
+    tr.appendChild(nc);
+    tr.appendChild(el("td","num",first.toFixed(c.dp)));
+    var nowCell = el("td","num");
+    nowCell.appendChild(document.createTextNode(last.toFixed(c.dp)));
+    if(tg != null){
+      var ch;
+      if(vals.length < 2){
+        ch = el("div","chip flat","baseline");
+      } else {
+        var hit = c.dir==="up" ? last>=tg : c.dir==="hold" ? Math.abs(last-tg)<=0.8 : last<=tg;
+        if(hit) ch = el("div","chip good","at target");
+        else {
+          var better = c.dir==="up" ? last>first
+                     : c.dir==="hold" ? Math.abs(last-tg)<=Math.abs(first-tg)
+                     : last<first;
+          ch = el("div","chip "+(better?"flat":"warn"), better?"improving":"watch");
+        }
+      }
+      ch.style.marginTop="3px";
+      nowCell.appendChild(ch);
+    }
+    tr.appendChild(nowCell);
+    tr.appendChild(el("td","num", tg==null ? "—" : tg.toFixed(c.dp)));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  var tw = el("div","tw"); tw.appendChild(t); host.appendChild(tw);
 }
 
 function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
@@ -1305,10 +1511,16 @@ function renderCardio(host){
 function bindWeekly(){
   var k=sundayOf(TODAY), rec=week(k);
   $("week-of").textContent="Logging the week of "+fmt(k,{day:"numeric",month:"long"});
-  var w=$("w-weight"), wa=$("w-waist");
+  var w=$("w-weight"), wa=$("w-waist"), bf=$("w-bf"), mm=$("w-mm"), vf=$("w-vf");
   w.value=rec.w==null?"":rec.w; wa.value=rec.waist==null?"":rec.waist;
-  function upd(){ rec.w=num(w.value); rec.waist=num(wa.value); rec.t=now(); persist(); renderTrend(); }
-  w.addEventListener("input",upd); wa.addEventListener("input",upd);
+  bf.value=rec.bf==null?"":rec.bf; mm.value=rec.mm==null?"":rec.mm; vf.value=rec.vf==null?"":rec.vf;
+  function upd(){
+    rec.w=num(w.value); rec.waist=num(wa.value);
+    rec.bf=num(bf.value); rec.mm=num(mm.value); rec.vf=num(vf.value);
+    rec.t=now(); persist(); renderCompEntry(); renderTrend();
+  }
+  [w,wa,bf,mm,vf].forEach(function(i){ i.addEventListener("input",upd); });
+  renderCompEntry();
 }
 
 function liftOptions(){
@@ -1472,6 +1684,8 @@ function renderTrend(){
     dv.innerHTML="<b>Weakest link right now: "+RULES[wi2][0]+".</b> "+RULES[wi2][1]+" — kept on "+perRule[wi2]+" of "+counted+" logged days. Fix one rule at a time, not all seven.";
     weak.appendChild(dv);
   } else weak.appendChild(el("div","sub","Log four days and this will tell you which rule is slipping most."));
+
+  renderComp(); renderCompEntry();
 
   var host=$("table-daily"); host.innerHTML="";
   var rows=[];
@@ -1693,6 +1907,7 @@ function bindData(){
   });
 
   $("lift-pick").addEventListener("change",renderTrend);
+  $("comp-pick").addEventListener("change",renderComp);
 
   var sS=$("set-start"), sT=$("set-target");
   syncTargetInputs();
